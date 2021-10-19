@@ -1,0 +1,49 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: "Kittens Carousel is a static website application deployed 
+with Apache Web Server on AWS Elastic Compute Cloud (EC2) Instance 
+using AWS Cloudformation Service. "
+
+Resources:
+  YavuzInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0c94855ba95c71c99
+      InstanceType: t2.micro
+      KeyName: key
+      SecurityGroups:
+        - !Ref ServerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: johw-cf-instance
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          sudo yum update -y
+          sudo yum install -y httpd
+          systemctl enable httpd.service
+          systemctl start httpd.service
+          usermod -a -G apache ec2-user
+          chown -R ec2-user:apache /var/www
+          chmod -R 777 /var/www/html
+          cd /var/www/html/
+          wget https://raw.githubusercontent.com/JohnWhyter/my-project/main/aws/Project-101-kittens-carousel-static-website-ec2/static-web/index.html
+          wget https://raw.githubusercontent.com/JohnWhyter/my-project/main/aws/Project-101-kittens-carousel-static-website-ec2/static-web/cat0.jpg
+          wget https://raw.githubusercontent.com/JohnWhyter/my-project/main/aws/Project-101-kittens-carousel-static-website-ec2/static-web/cat1.jpg
+          wget https://raw.githubusercontent.com/JohnWhyter/my-project/main/aws/Project-101-kittens-carousel-static-website-ec2/static-web/cat2.jpg
+          wget https://raw.githubusercontent.com/JohnWhyter/my-project/main/aws/Project-101-kittens-carousel-static-website-ec2/static-web/cat3.png
+          
+
+  ServerSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Allow http to client host
+        SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
