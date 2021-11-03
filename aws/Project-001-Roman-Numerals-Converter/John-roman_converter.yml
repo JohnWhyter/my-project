@@ -1,0 +1,67 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: This template creates an EC2 instance which enables SSH connection.
+Parameters:
+  KeyPairNew:
+    Description: This is my key.
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    Default: key
+Resources:
+  JohnCFInstance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      ImageId: ami-01cc34ab2709337aa
+      InstanceType: t2.micro
+      KeyName: !Ref KeyPairNew
+      SecurityGroups:
+        - !Ref ServerSecurityGroup
+      Tags:
+        - Key: Name
+          Value: !Sub 'Web Server of ${AWS::StackName} Stack'
+      UserData:
+        'Fn::Base64': !Sub >
+          #!/bin/bash 
+
+          yum update -y
+
+          yum install python3 -y 
+
+          pip3 install flask
+          
+          cd /home/ec2-user
+
+          mkdir templates
+
+          cd templates
+
+          wget https://raw.githubusercontent.com/JohnWhyter/my-project/main/aws/Project-001-Roman-Numerals-Converter/templates/index.html 
+
+          wget https://raw.githubusercontent.com/JohnWhyter/my-project/main/aws/Project-001-Roman-Numerals-Converter/templates/result.html
+
+          cd ..
+
+          wget https://raw.githubusercontent.com/JohnWhyter/my-project/main/aws/Project-001-Roman-Numerals-Converter/app.py
+
+          python3 app.py
+
+  ServerSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Allow http and ssh to client host
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: MySecGroup
+Outputs:
+  WebsiteURL:
+    Value: !Sub 
+      - 'http://${PublicAddress}'
+      - PublicAddress: !GetAtt JohnCFInstance.PublicDnsName
+    Description: Decimal to Roman Number Converter Application URL
