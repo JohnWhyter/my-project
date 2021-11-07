@@ -1,0 +1,192 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: |
+  CloudFormation Template for Phonebook Website on EC2.
+  
+Parameters:
+  MyVPCId:
+    Description: My Default VPC ID
+    Type: AWS::EC2::VPC::Id
+
+  KeyPair:
+    Description: This is my key.
+    Type: 'AWS::EC2::KeyPair::KeyName'
+    
+
+  MySubnets:
+    Description: My Default Subnets
+    Type: List<AWS::EC2::Subnet::Id>
+  
+  MyInstanceType:
+    Description: WebServer EC2 instance type
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+      - t1.micro
+      - m1.small
+      - m1.medium
+      - m1.large
+    ConstraintDescription: must be a valid EC2 instance type.
+  PolicyTargetValue:
+    Description: Please enter your Target value that triggers the Autoscaling
+    Default: '60'
+    Type: String
+  
+Mappings:
+  RegionImageMap:
+    us-east-1:
+      AMI: ami-01cc34ab2709337aa
+    us-east-2:
+      AMI: ami-0f19d220602031aed
+    us-west-1:
+      AMI: ami-0e0bf4b3a0c0e0adc
+    us-west-2:
+      AMI: ami-0e5b6b6a9f3db6db8
+  
+Resources:
+  MyDatabaseInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    Properties:
+      Engine: mysql
+      EngineVersion: 8.0.19
+      DBInstanceClass: db.t2.micro
+      StorageType: "gp2"
+      AllocatedStorage: "20"
+      PubliclyAccessible: "true"
+      BackupRetentionPeriod: 7
+      DBInstanceIdentifier: !Join ["-", ["MyDatabaseInstance", !Ref "AWS::Region"]]
+      MasterUsername: admin
+      MasterUserPassword: Johnw-2121
+      DBName: phonebook
+      PreferredBackupWindow: 02:00-03:00
+      PreferredMaintenanceWindow: mon:03:00-mon:04:00
+      VPCSecurityGroups: 
+        - Fn::GetAtt: [ MyDatabaseSecurityGroup, GroupId ]
+
+  MySecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: Enables SSH, HTTP  #required
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - CidrIp: 0.0.0.0/0
+          FromPort: 3306
+          ToPort: 3306
+          IpProtocol: tcp
+          
+  MyDatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: Access to database and SSH
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          FromPort: 3306
+          ToPort: 3306
+          IpProtocol: tcp
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          
+
+  MyLoadBalancingTargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      HealthCheckIntervalSeconds: 25
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 3
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 3
+      VpcId: !Ref MyVPCId
+  
+  MyLoadBalancerListener:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties:
+      DefaultActions: #required
+        - TargetGroupArn: !Ref MyLoadBalancingTargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref MyLoadBalancer
+      Port: 80 #required
+      Protocol: HTTP #required
+  
+  MyLoadBalancer:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      SecurityGroups:
+        - !GetAtt MySecurityGroup.GroupId
+      Subnets:
+        !Ref MySubnets
+  
+  MyLaunchTemplate:
+    Type: "AWS::EC2::LaunchTemplate"
+    Properties:
+      LaunchTemplateData:
+        ImageId: !FindInMap 
+          - RegionImageMap
+          - !Ref AWS::Region
+          - AMI
+        InstanceType: !Ref MyInstanceType
+        KeyName: !Ref KeyPair
+        SecurityGroups: 
+          - !Ref MySecurityGroup
+        UserData:
+          "Fn::Base64":
+            !Sub |
+              #!/bin/bash 
+              yum update -y
+              yum install python3 -y 
+              pip3 install flask
+              pip3 install flask_sqlalchemy
+              pip3 install flask_mysql
+              pip3 install mysql-connector-python
+              echo "${MyDatabaseInstance.Endpoint.Address}" > /home/ec2-user/dbserver.endpoint
+              cd /home/ec2-user
+              wget https://github.com/JohnWhyter/my-project/raw/main/aws/Project-004-Phonebook-Application/app3.zip
+              unzip app.zip
+              python3 phonebook-app.py
+  MyAutoScalingGroup:
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    Properties:
+      AvailabilityZones: !GetAZs
+      DesiredCapacity: "2"
+      HealthCheckGracePeriod: 90
+      HealthCheckType: ELB
+      LaunchTemplate:
+        LaunchTemplateId: !Ref MyLaunchTemplate
+        Version: !GetAtt MyLaunchTemplate.LatestVersionNumber
+      MaxSize: "3" #required
+      MinSize: "1" #required
+      TargetGroupARNs:
+        - !Ref MyLoadBalancingTargetGroup
+
+  myCPUPolicy:
+    Type: "AWS::AutoScaling::ScalingPolicy"
+    Properties:
+      AutoScalingGroupName: !Ref MyAutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: !Ref PolicyTargetValue
+    
+Outputs:
+  URL:
+    Description: The URL of the website
+    Value: !Join 
+      - ''
+      - - 'http://'
+        - !GetAtt MyLoadBalancer.DNSName
+  DatabaseEndpoint: 
+    Description: The database endpoint
+    Value: !GetAtt MyDatabaseInstance.Endpoint.Address
+
+
